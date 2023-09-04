@@ -1,0 +1,5 @@
+Make sure that all files have proper copyright notices before release
+Make sure that all headers have include guards before release
+
+Support UEFI (which would basically just mean passing through any boot services tag since this is just an in-memory loader)
+Add better unit tests (fully automate the tests using expect or the like, and also test as many possible scenarios, rather than just those that are easy to test by assembling and linking .S files normally; this will require hand-generated binary files to be included to test things like malformed XRFS or ELF images)

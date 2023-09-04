@@ -1,0 +1,9 @@
+s/pub type seL4_Word = [0-9A-Za-z_][0-9A-Za-z_:[:space:]]*;/pub type seL4_Word = usize;/g
+s/pub type seL4_Int8 = [0-9A-Za-z_][0-9A-Za-z_:[:space:]]*;/pub type seL4_Int8 = i8;/g
+s/pub type seL4_Int16 = [0-9A-Za-z_][0-9A-Za-z_:[:space:]]*;/pub type seL4_Int16 = i16;/g
+s/pub type seL4_Int32 = [0-9A-Za-z_][0-9A-Za-z_:[:space:]]*;/pub type seL4_Int32 = i32;/g
+s/pub type seL4_Int64 = [0-9A-Za-z_][0-9A-Za-z_:[:space:]]*;/pub type seL4_Int64 = i64;/g
+s/pub type seL4_Uint8 = [0-9A-Za-z_][0-9A-Za-z_:[:space:]]*;/pub type seL4_Uint8 = u8;/g
+s/pub type seL4_Uint16 = [0-9A-Za-z_][0-9A-Za-z_:[:space:]]*;/pub type seL4_Uint16 = u16;/g
+s/pub type seL4_Uint32 = [0-9A-Za-z_][0-9A-Za-z_:[:space:]]*;/pub type seL4_Uint32 = u32;/g
+s/pub type seL4_Uint64 = [0-9A-Za-z_][0-9A-Za-z_:[:space:]]*;/pub type seL4_Uint64 = u64;/g

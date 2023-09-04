@@ -1,0 +1,3 @@
+#!/usr/bin/gmake
+build:
+	echo "TODO: write a rules file"

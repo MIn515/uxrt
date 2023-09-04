@@ -1,0 +1,25 @@
+[package]
+
+name = "bitmap"
+version = "3.2.0"
+authors = ["Andrew Warkentin <andreww591@gmail.com>"]
+
+description = "A dense bitmap"
+repository = "https://gitlab.com/uxrt/fel4/rust-bitmap"
+homepage = "https://gitlab.com/uxrt/fel4/rust-bitmap"
+
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+intrusive-collections = { version = "0.9", features = ["nightly"] }
+custom-slab-allocator = { version = "0.1.0", path = "../custom-slab-allocator" }
+log = { version = "0.4" }
+
+[dev-dependencies]
+quickcheck = "0.2.26"
+rand = "0.7"
+
+[features]
+no_std = []
+collections = []

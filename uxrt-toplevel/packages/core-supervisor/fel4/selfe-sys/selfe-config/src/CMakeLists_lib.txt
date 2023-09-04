@@ -1,0 +1,29 @@
+cmake_minimum_required(VERSION 3.7.2)
+
+project(rootserver)
+
+# base.cmake requires this be present
+add_custom_target(rootserver_image)
+
+include($ENV{SEL4_TOOLS_DIR}/cmake-tool/base.cmake)
+#include($ENV{SEL4_TOOLS_DIR}/cmake-tool/configuration.cmake)
+
+set(configure_string "")
+config_string(
+    SelfeRootStack
+    SELFE_ROOT_STACK
+    "Size of the initial stack for the root task"
+    DEFAULT
+    65536
+    UNQUOTE
+)
+config_string(
+    SelfeStaticTLS
+    SELFE_STATIC_TLS
+    "Size of static TLS area for new processes"
+    DEFAULT
+    16384
+    UNQUOTE
+)
+add_config_library(selfe "${configure_string}")
+

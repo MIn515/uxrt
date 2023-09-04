@@ -1,0 +1,26 @@
+# Copyright (c) 2022 Andrew Warkentin
+#
+# Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+# http://www.apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT
+# or http://opensource.org/licenses/MIT>, at your option. All files in the
+# project carrying such notice may not be copied, modified, or distributed
+# except according to those terms.
+#
+[package]
+name = "sel4-thread-park"
+version = "0.1.0"
+authors = ["Andrew Warkentin <andreww591@gmail.com>"]
+description = "Library for parking and unparking threads on seL4"
+repository = "https://gitlab.com/uxrt/core-supervisor/fel4/sel4-thread-park"
+
+[dependencies]
+sel4 = { version = "0.0.14", path = "../rust-sel4" }
+failure = { version = "0.1.5", features = ["failure_derive"], default-features = false }
+log = { version = "0.4" }
+selfe-sys = { version = "0.1.2", path = "../selfe-sys" }
+
+[build-dependencies]
+selfe-config = { path = "../selfe-sys/selfe-config" }
+
+[features]
+debug = []

@@ -1,0 +1,55 @@
+#!/bin/bash
+# This script gets the physical load address and in-memory size to use for an
+# seL4 kernel binary in a UX/RT boot image.
+# 
+
+TMPFILE=`mktemp`
+basename="`basename $0`"
+
+trap "rm -f $TMPFILE" HUP TERM INT EXIT
+
+if [ ! "$1" ]
+then
+	echo "usage: $basename [-a | -p <priority>] <executable>"
+	echo "Gets the XRFS load address and in-memory size for a kernel or root server binary."
+	echo "The -a option automatically places the file at priority 0 rather than extracting the starting physical address."
+	echo "The -p option automatically places the file at the given priority."
+	echo "All files of a given priority will be placed together in descending order, with priority 0 being the first."
+	exit 1
+fi
+
+priority=0
+
+case "$1" in
+	-a) auto_addr="1"
+            shift;;
+	-p) shift
+	    auto_addr="1"
+	    priority="$1"
+	    shift;;
+esac
+
+if ! readelf -lW -- "$1" > "$TMPFILE"
+then
+	echo "$basename: cannot open $1" >&2
+	exit 1
+fi
+
+start_addrs="`grep ' LOAD' \"$TMPFILE\" | head -n 1`"
+start_offset="`echo \"$start_addrs\" | awk '{print $2}'`"
+start_paddr=`echo \"$start_addrs\" | awk '{print $4}'`
+
+end_addrs="`grep ' LOAD' \"$TMPFILE\" | tail -n 1`"
+main_paddr="`echo \"$end_addrs\"  | awk '{print $4}'`"
+main_memsz="`echo \"$end_addrs\"  | awk '{print $6}'`"
+end_paddr=$((main_paddr + main_memsz))
+
+paddr=$(($start_paddr - $start_offset))
+memsz=$(($end_paddr - $paddr))
+
+if [ "$auto_addr" ]
+then
+	printf "auto,%d,%u\n" "$priority" "$memsz"
+else
+	printf "0x%x,%u\n" "$paddr" "$memsz"
+fi

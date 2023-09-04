@@ -1,0 +1,22 @@
+[package]
+
+name = "sparse-array"
+version = "0.2.0"
+authors = ["Andrew Warkentin <andreww591@gmail.com>"]
+
+description = "A sparse array for allocators (implemented using an RBTree of sub-arrays with bitmaps for searching)"
+repository = "https://gitlab.com/uxrt/fel4/rust-sparse-array"
+homepage = "https://gitlab.com/uxrt/fel4/rust-sparse-array"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+intrusive-collections = { version = "0.9", features = ["nightly"] }
+custom-slab-allocator = { version = "0.1.0", path = "../custom-slab-allocator" }
+log = { version = "0.4" }
+
+[features]
+no_std = []
+collections = []
+debug_array = []
+debug_suballoc = []

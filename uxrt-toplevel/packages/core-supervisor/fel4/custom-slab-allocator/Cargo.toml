@@ -1,0 +1,12 @@
+[package]
+name = "custom-slab-allocator"
+version = "0.1.0"
+authors = ["Andrew Warkentin <andreww591@gmail.com>"]
+license = "MIT"
+
+description = "A trait for slab allocators that support adding slabs of custom sizes"
+keywords = ["slab", "allocator", "no_std", "heap", "kernel"]
+
+repository = "https://gitlab.com/uxrt/core-supervisor/fel4/custom-slab-allocator"
+
+[dependencies]

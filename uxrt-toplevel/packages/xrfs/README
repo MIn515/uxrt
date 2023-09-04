@@ -1,0 +1,19 @@
+XRFS is a minimalist read-only filesystem with execute-in-place support,
+intended mainly for use in boot images. It is based on a modified version of the
+Multiboot2 header (which allows bootloaders and kernels to handle it with 
+Multiboot2 code instead of having to incorporate a completely separate driver)
+
+This package contains libraries and utilities for XRFS under UX/RT as well as
+other operating systems.
+
+Contents:
+
+genxrfs/             Utility for building XRFS images
+mkbootimage          Wrapper for genxrfs to build XRFS images from file lists
+mount_xrfs_uxrt/     mount_xrfs program for UX/RT
+xrfslib/             Static library for reading XRFS images
+
+
+The layout of the filesystem is the following:
+
+TODO: update this for the new MBH-only format

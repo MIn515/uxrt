@@ -1,0 +1,28 @@
+# Copyright (c) 2022 Andrew Warkentin
+#
+# Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+# http://www.apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT
+# or http://opensource.org/licenses/MIT>, at your option. All files in the
+# project carrying such notice may not be copied, modified, or distributed
+# except according to those terms.
+#
+[package]
+name = "uxrt-transport-layer"
+version = "0.1.0"
+authors = ["Andrew Warkentin <andreww591@gmail.com>"]
+description = "UX/RT IPC transport layer"
+repository = "https://gitlab.com/uxrt/core-supervisor/transport-layer"
+
+[dependencies]
+sel4 = { version = "0.0.14", path = "../fel4/rust-sel4" }
+failure = { version = "0.1.5", features = ["failure_derive"], default-features = false }
+log = { version = "0.4" }
+selfe-sys = { version = "0.1.2", path = "../fel4/selfe-sys" }
+enum-primitive-derive = "0.2.2"
+num-traits = { version = "0.2.15", default_features = false }
+usync = { path = "../fel4/usync-sel4" }
+intrusive-collections = { version = "0.9", features = ["nightly"] }
+static_assertions = "1.1.0"
+
+[build-dependencies]
+selfe-config = { path = "../fel4/selfe-sys/selfe-config" }

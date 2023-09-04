@@ -1,0 +1,52 @@
+#!/bin/sh
+#
+# This file is in te public domain.
+#
+# This script creates a C include file from of command line arguments.  When
+# invoked as conf-sh dir/conf.h a=1 -Db=c d e=f -Dg, it creates a file named
+# conf.h in dir, containing the following lines:
+#
+# #ifdef __DIR_CONF_H
+# #define __DIR_CONF_H 1
+#
+# #define a	1
+# #define b	c
+# #define d
+# #define e	f
+# #define g
+#
+# #endif
+#
+# This is basically a trick to get rid of a lot of target-specific CFLAGS
+# with lots of -D options, by folding them into a single header file.
+
+fil=$1 ; shift
+if [ x"$fil" = x ] 
+then
+	echo Usage: $0 file [macro[=value]]...
+	exit 1
+fi
+exec >$fil
+
+nam=`echo __$fil | tr a-z A-Z | sed -e 's/[^A-Z]/_/g'`
+cat <<EOF
+
+/* This is an automatically generated file. */
+
+#ifndef $nam
+#define $nam $nam
+
+EOF
+
+while [ x"$1" != x ]
+do
+	echo "#define $1" | sed -e 's/ -D/ /' -e 's/=/	/'
+	shift
+done
+
+cat <<EOF
+
+#endif	/* $nam */
+
+EOF
+

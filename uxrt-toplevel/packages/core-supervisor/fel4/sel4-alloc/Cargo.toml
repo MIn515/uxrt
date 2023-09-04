@@ -1,0 +1,43 @@
+# Copyright (c) 2018-2022 Andrew Warkentin
+#
+# Based on code from Robigalia:
+#
+# Copyright (c) 2015 The Robigalia Project Developers
+# Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+# http://www.apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT
+# or http://opensource.org/licenses/MIT>, at your option. All files in the
+# project carrying such notice may not be copied, modified, or distributed
+# except according to those terms.
+#
+[package]
+name = "sel4-alloc"
+version = "0.2.0"
+authors = ["Andrew Warkentin <andreww591@gmail.com>"]
+description = "CSpace, VSpace, and untyped-memory managers, along with a slab heap allocator, for seL4"
+repository = "https://gitlab.com/uxrt/core-supervisor/fel4/sel4-alloc"
+#documentation = "https://doc.robigalia.org/sel4-alloc"
+
+[build-dependencies]
+selfe-config = { path = "../selfe-sys/selfe-config" }
+
+[dependencies]
+sel4 = { version = "0.0.14", path = "../rust-sel4" }
+bitmap = { version = "3.2.0", path = "../rust-bitmap", features = ["no_std", "collections"] }
+custom-slab-allocator = { version = "0.1.0", path = "../custom-slab-allocator" }
+slab_allocator_core = { version = "0.2.0", path = "../slab-allocator-core", features = [] }
+sparse-array = { version = "0.2.0", path = "../rust-sparse-array", features = ["no_std", ] }
+#sparse-array = { version = "0.2.0", path = "../rust-sparse-array", features = ["no_std", "debug_array", "debug_suballoc" ] }
+usync = { version = "0.2.1", path = "../usync-sel4" } 
+intrusive-collections = { version = "0.9", features = ["nightly"] }
+failure = { version = "0.1.5", features = ["failure_derive"], default-features = false }
+log = { version = "0.4" }
+selfe-sys = { version = "0.1.2", path = "../selfe-sys" }
+sel4-start = { path = "../selfe-sys/sel4-start" }
+
+
+[features]
+debug = []
+debug_cspace = []
+debug_vspace = []
+debug_utspace = []
+debug_heap = []

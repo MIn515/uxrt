@@ -1,0 +1,109 @@
+#!/bin/bash
+
+version=0.1
+root=/
+
+cleanup()
+{
+	if [ -d "$tmpdir" ]
+	then
+		rm -rf "$tmpdir"
+	fi
+}
+catchsig()
+{
+	cleanup
+	exit 1
+}
+trap catchsig HUP INT QUIT TERM
+trap cleanup EXIT
+basename="`basename $0`"
+
+outeropts=()
+inneropts=()
+
+while getopts "ho:p:r:v" arg
+do
+	case "$arg" in
+		h) 
+			echo "TODO: add help" 
+			exit
+			;;
+		o)
+			outeropts+=("-o")
+			outeropts+=("$OPTARG")
+			;;
+		n)
+			inneropts+=("-n")
+			;;
+		p)
+			outeropts+=("-p")
+			outeropts+=("$OPTARG")
+			inneropts+=("-p")
+			inneropts+=("$OPTARG")
+			;;
+		r)
+			outeropts+=("-r")
+			outeropts+=("$OPTARG")
+			;;
+		v) verboseopt="-v";;
+		\?) exit 1;;
+	esac
+	optfound=1
+done
+
+imgind=$OPTIND
+dirind=$((OPTIND + 1))
+img=${!imgind}
+dir=${!dirind}
+
+if [ ! "$dir" ]
+then
+	dir="."
+fi
+
+tmpdir="`mktemp -d`"
+
+if [ ! -d "$dir" ]
+then
+	echo "$dir: not a directory" >&2
+	exit 1
+fi
+
+cd $dir
+
+if [ ! -d contents ]
+then
+	echo "$dir doesn't contain a contents directory" >&2
+	exit 1
+fi
+
+for entry in ./*
+do
+	if [ "$entry" == "./contents" ]
+	then
+		continue
+	fi
+	find "$entry" -type d -exec mkdir -p "$tmpdir/{}" \;
+	find "$entry" -type b,c,p,f,l -exec sh -c "ln -s \"$PWD\"/\"{}\" \"$tmpdir\"/\"\`dirname '{}'\`\"/@\"\`basename '{}' | sed 's/^@//g' \`\"" \;
+done
+
+cd $OLDPWD
+
+set -e
+[ "$verboseopt" ] && echo "--- inner image ---"
+genxrfs "${inneropts[@]}" $verboseopt "$tmpdir/contents" "$dir/contents"
+filesize="`wc -c $tmpdir/contents | awk  '{print $1}'`"
+lzma "$tmpdir/contents"
+#Set the size field of the compressed image to the actual size of the file since#the loader needs to know this beforehand
+#
+#The lzma command always sets this to a placeholder for some reason
+#
+#This also makes the unlzma command reject the file, but the decompression 
+#library used by the loader is fine with it
+python -c "import struct; import sys; sys.stdout.buffer.write(struct.pack('<Q', ${filesize}))" | dd of="$tmpdir/contents.lzma" seek=5 conv=notrunc bs=1 count=8
+#suppress Unix metadata on outer image, since the intent is that it should only
+#contain a chain-loader to decompress the inner image
+[ "$verboseopt" ] && echo "--- outer image ---"
+genxrfs -n "${outeropts[@]}" $verboseopt "$img" "$tmpdir"
+updatembh $verboseopt "$img"

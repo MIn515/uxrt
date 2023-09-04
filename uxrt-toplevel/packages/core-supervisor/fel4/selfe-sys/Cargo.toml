@@ -1,0 +1,28 @@
+[package]
+name = "selfe-sys"
+version = "0.1.2"
+authors = ["Russell Mull <russell@auxon.io>", "Zachary Pierce <zack@auxon.io>"]
+edition = "2018"
+resolver = "2"
+
+[lib]
+name = "sel4_sys"
+
+[dependencies]
+rlibc = "1.0"
+
+[build-dependencies]
+bindgen = { version = "0.52", default-features = false }
+selfe-config = { path = "./selfe-config" }
+quote = "0.6"
+toml = "0.5"
+proc-macro2 = "0.4"
+itertools = "0.8.0"
+cc = "1.0"
+
+[dev-dependencies]
+proptest = "0.9.2"
+
+[features]
+default = ["tls"]
+tls = []

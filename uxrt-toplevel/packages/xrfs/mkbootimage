@@ -1,0 +1,165 @@
+#!/bin/bash
+version=0.1
+root=/
+
+cleanup()
+{
+	if [ -d "$tmpdir" ]
+	then
+		rm -rf "$tmpdir"
+	fi
+}
+catchsig()
+{
+	cleanup
+	exit 1
+}
+trap catchsig HUP INT QUIT TERM
+trap cleanup EXIT
+
+mklinkfarm()
+{
+	cd "$1"
+	find . -type d -exec mkdir -p "$2/{}" \;
+	find . -type b,c,p,f,l -exec sh -c "ln -s \"$PWD\"/\"{}\" \"$2\"/\"\`dirname '{}'\`\"/@\"\`basename '{}' | sed 's/^@//g' \`\"" \;
+	cd "$OLDPWD"
+}
+
+basename="`basename $0`"
+tmpdir="/tmp/mkimage.$$"
+ 
+if ! mkdir "$tmpdir"
+then
+	echo "$basename: cannot make staging directory" >&2
+	exit 1
+fi
+
+while :
+do
+	case "$1" in
+		-V)
+			shift
+			label="$1"
+			shift
+			;;
+		-r)
+			shift
+			root="$1"
+			shift
+			;;
+		-h)
+			echo "usage: $basename [options] <image> <list file>"
+			echo
+			echo "options:"
+			echo "-V <label>        specify a volume label for the image"
+			echo "-r <root>         use an alternate root directory for source files with absolute paths"
+            echo "-h                display this help"
+            echo "-v                display version and copyright information"
+            exit
+			;;
+		-v)
+			echo "$basename $version"
+			echo "Copyright (C) 2011 Andrew Warkentin"
+            exit
+			;;
+		*)
+			break
+			;;
+	esac
+done
+
+if [ ! "$1" -o ! "$2" ]
+then
+	echo "usage: $basename [options] <image> <list file>"
+	echo "Try '$basename --help for more information'"
+	exit
+fi
+
+image="$1"
+list="$2"
+
+if [ "$list" != "-" ]
+then
+	if [ ! -r "$list" ]
+	then
+		echo "`basename $0`: cannot read $list" >&2
+		exit 1
+	fi
+	if [ -d "$list" ]
+	then
+		echo "`basename $0`: $list is a directory" >&2
+		exit 1
+	fi
+	exec < "$list"
+fi
+
+while IFS="=" read dest src
+do
+	if [ "${dest:0:1}" = "#" ]
+	then
+		continue
+	fi
+	if [ ! "$src" ]
+	then
+		src="$dest"
+	fi
+	if [ ${dest:0:1} = "/" ]
+	then
+		dest="${dest:1}"
+	fi
+	dest="$tmpdir/$dest"
+	cmd="ln"
+	if [ "${src:0:1}" = "@" ]
+	then
+		src=${src:1}
+	elif [ "$src" = "[mkdir]" ]
+	then
+		cmd="mkdir"
+	else
+		dir="`dirname "$dest"`"
+		if [ "$dir" = "." ]
+		then
+			dir=""
+		else
+			dir="${dir}/"
+		fi
+		if [ -d $src ]
+		then
+			#directories are added as farms of @-links rather than single links,
+			#in order to allow adding files to them
+			cmd="mklinkfarm"
+		else
+			#prefixing a symlink name with '@' makes genxrfs dereference it
+			dest="${dir}@`basename "$dest"`"
+		fi
+	fi
+	if [ "${src:0:1}" != "/" ]
+	then
+		src="`pwd`"/"$src"
+	fi
+	case "$cmd" in
+		ln)
+			if [ "$root" != / -a ${src:0:1} = "/" ]
+			then
+				src="$root/${src:1}"
+			fi
+			mkdir -p "`dirname $dest`"
+			ln -s "$src" "$dest"
+			;;
+		mkdir)
+			mkdir -p "$dest"
+			;;
+		mklinkfarm)
+			mklinkfarm "$src" "$dest"
+			;;
+	esac
+done
+
+exec < /dev/null
+
+if [ "$label" ]
+then
+	genxrfs "$labelopt" "$label" "$image" "$tmpdir"
+else
+	genxrfs "$image" "$tmpdir"
+fi

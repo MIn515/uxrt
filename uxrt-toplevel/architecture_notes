@@ -1,0 +1,1380 @@
+General overview of (planned) features:
+
+    - Overall architecture similar to QNX with some concepts from Plan 9, but 
+        not a direct clone of either
+    - Mostly standard Unix-like environment, with most Linux-specific APIs
+        implemented
+    - Written mostly in a mixture of Rust and C, with Rust preferred for new
+        first-party components
+    - Incorporates existing third-party code wherever it is reasonable, rather
+        than reinventing the wheel
+        Major third-party components incorporated:
+            * seL4 microkernel (upstream with a few minor patches)
+            * FreeBSD core Unix commands (hard fork with multiple splits and
+              regularizations sort of like those in Plan 9 but less drastic and
+              still mostly POSIX-compatible)
+            * GNU coreutils as an optional alternative to the native BSD-based
+              system utilities (only supported alongside the native system
+              utilities, not as a replacement)
+            * musl libc (hard fork due to the unconventional standard library
+              architecture)
+            * LKL (Linux kernel as a library, for physical device drivers and
+              disk/network filesystems) (upstream with patches)
+            * dpkg/apt (upstream with patches)
+            * Xorg (will be mostly replaced with an original window system
+              eventually) (upstream with patches)
+    - Mostly server-per-subsystem-instance architecture as in QNX, rather than
+        the server-per-component architecture of most other microkernel OSes
+        (for example, the disk driver, LVM, and filesystem driver are plugins
+        for a disk server, with a separate disk server process for each
+        host adapter, rather than having them implemented as separate servers;
+        this should allow for much better performance, while still maintaining 
+        more or less equivalent reliability and security, since many such
+        subsystems have different components dealing with the same data at
+        different levels, and error recovery in all components of a subsystem is
+        strongly desirable); when vertical separation of layers is desired, it
+        is possible to run layers in separate processes, but there is no 
+        requirement to separate layers in situations where it makes no sense
+    - Small core supervisor consisting of the seL4 microkernel, the process
+        server (a.k.a. root server), and the root library (which provides the
+        low-level client-side interfaces to the microkernel and process server
+        as well as the dynamic linker), with all other functionality being
+        implemented through normal processes and libraries (unlike many other
+        microkernel OSes, which have multiple "special" processes)
+    - Almost entirely file-oriented architecture, with all IPC and basically all
+        memory management being accessed through filesystem-based APIs at the
+        lowest level
+    - Separation of file-related APIs into a transport layer (read/write/seek
+        and the like, implemented purely in the root library using kernel calls)
+        and a VFS layer (open/stat/close and the like, implemented in the
+        process server with interface functions in the root library, with all
+        calls being sent over a permanently open file descriptor)
+    - IPC transport layer based purely on unstructured streams (with both
+        regular byte streams as well as message-oriented streams implemented as
+        modified byte streams that return the same number of bytes on read that
+        were originally written), rather than the RPC-like transport layers that
+        most other microkernel OSes use (UX/RT's message oriented streams make
+        implementing RPC-like protocols on top of unstructured streams easy)
+    - Conventional Unix-style read/write as well as message-register- and
+        shared-buffer-oriented IPC APIs, with full interoperability between all 
+        three (messages are automatically converted between registers and
+        buffers as necessary, so processes do not have to care about what the
+        other end is using)
+    - Process server implementing core VFS and basic process/memory management,
+        along with a few special filesystems (procfs, part of sysfs,
+        full/mem/null/zero devices, and several variants of tmpfs-like
+        filesystems)
+    - Purely IPC-oriented VFS model with no concept of devices and no on-disk
+        device nodes (similar to Plan 9, servers export filesystems by 
+        creating a "port" file in a special filesystem and listening for
+        requests on it; character and block device nodes are still present, but
+        they do not have device numbers and are handled almost identically to
+        regular files; support for creating/manipulating on-disk device nodes of
+        filesystems from other OSes is provided, but opening them is disallowed
+        at the VFS level)
+    - Per-process namespaces, along with with a secondary global namespace,
+        with per-process namespaces constructed exclusively with bindings from
+        the global namespace
+    - Support for transcluding files from other servers, similar to QNX
+    - Memory managment implemented purely through mappings of files in
+        tmpfs-like filesystems, with no normal anonymous memory (each process
+        has its own tmpfs for its heap and stack) and no support for directly
+        exporting memory-mapped files from regular servers (servers may export
+        memory-resident files by transcluding from a private tmpfs, and mapping
+        of disk/network files is handled by a special "shadow" tmpfs-like
+        filesystem that pages to/from the underlying file with normal reads and 
+        writes)
+    - Partial capabilities-based security model, with file descriptors
+        implemented as kernel capabilities and access control through
+        per-process permission lists (these specify access rights along with a
+        path or label/classification; it is possible for a path-based entry
+        to specify all files in a directory and it is also possible for an entry
+        to specify that the access rights should be taken from the file mode as 
+        in conventional Unix), as well as a secondary non-kernel-based type of 
+        capability that references a path in the namespace of another process
+        rather than a connection as an FD does, in order to allow more 
+        flexibility when granting access to files by other processes than FDs 
+        alone would allow.
+    - Flexible role-based access control implemented on top of permission lists,
+        allowing specifcation of roles used by a program and roles permitted for
+        users (root-only status of APIs is completely eliminated, with roles
+        being the only form of access control for APIs that are root-only in
+        conventional Unix); setuid and setgid bits on executables have no effect
+        (setgid on directories still has the same effect as it does on Linux),
+        with the RBAC database specifying when a program should be run with
+        escalated privileges
+    - Flexible containerization integrated with the package manager, allowing
+        basically anything to be either private or shared (e.g. a container may
+        just virtualize dependencies for a package, while sharing the user 
+        files, PID namespace, and IP address of the top level, or it may have
+        private data files, a private PID namespace, and a dedicated IP as in
+        Docker, FreeBSD jails, and Solaris zones, or anything in between)
+    - Functional package management layer integrated with apt/dpkg and the
+        container management utilities, with each package version being unpacked
+        into its own directory and the package directories being joined into a 
+        single environment in which the package install/uninstall scripts are
+        run (for compatibility with non-dpkg Linux distributions it will be
+        possible to make containers that aren't managed by the system package
+        manager); "debimages" somewhat like AppImages but without the
+        self-extractor (they will be executable through binfmt_misc) and
+        containing a collection of unpacked debs (in the same format as the
+        normal package backing store) will also be supported
+    - Utilities for building fully custom distributions and repositories, 
+        eliminating the need for building distributions "from scratch" like in
+        Linux
+    - Linux binary compatibility layer implemented as a combination of a wrapper
+        loader (somewhat like lxrun on old versions of Solaris or UnixWare) and 
+        a binfmt_misc-like hook for invoking an arbitrary loader for files based
+        on magic number; automatic replacement of system call traps with 
+        function calls will be supported in order to improve performance, and
+        both dynamic and static Linux binaries will be supported
+    - Modular init system with a minimal process 1 and multiple delegated
+        restarter daemons, each for a different type of service (as in SMF), 
+        using declarative unit files for starting daemons and shell scripts for 
+        basically all initialization (both system-wide initialization and setup
+        of the environment for individual daemons; most entries in unit files 
+        will be passed to setup scripts as environment variables)
+    - Generic event management daemon included in the init system, replacing
+        the functionality of the many type-specific event management daemons on 
+        Linux (udev, systemd-hostnamed et al, NetworkManager, acpid, udisks,
+        etc.) with units and scripts
+    - Support for cgroups, similar to in Linux, but without the requirement for
+        a single daemon to manage them (the init system will make extensive use 
+        of them)
+    - Login/session management integrated with the init system, with all
+        login/authentication happening through the login command and all
+        sessions being managed as cgroups (meaning other authentication-related
+        programs just call the login command instead of being linked with PAM,
+        and utmp is replaced with tags on cgroups)
+    - Custom policy-free compositing window server with support for external
+        reparenting window managers similar to X11
+    - Desktop environment that superficially resembles macOS or NeXTStep by 
+        default but is highly customizable
+        * BTRON-like object model, with support for compound documents that mix
+          elements from multiple applications (although unlike in BTRON, there
+          will be a distinction between "weak" and "strong" links)
+        * Database-like filesystem access, including tags/labels and saving 
+          searches as folder-like objects (these are implemented as directories
+          handled by a translator server)
+
+    - TODO: finish this list
+
+
+    - TODO: once the system is working reasonably well and the architecture is a bit more settled, write a retrospective comparing UX/RT to predecessor systems (i.e. Linux and other conventional Unix, QNX, Plan 9) and describing major features that have been added, kept, replaced, or abandoned, along the lines of the paper comparing seL4 to its predecessors at https://ts.data61.csiro.au/publications/nicta_full_text/8988.pdf
+
+Core supervisor:
+    Uninitialized memory should be set to a distinctive value that is a
+    pointer to hypervisor space or kernel space, so that attempts to
+    dereference wild pointers (or at least, word-aligned wild pointers)
+    cause a segfault.
+
+    The VFS should be built into the process server (like QNX but without the
+    process server being colocated in the kernel) rather than having it as a
+    separate process (it would be a little tricky to have it separate in an OS
+    with no anonymous user memory in normal processes; also, this would simplify
+    the boot process and would make procfs much easier to implement).
+
+    Features like namespaces that are shared between processes and possibly
+    cgroups should probably be implemented in servers separate from the process
+    server. The process server should maintain an independent set of mounts for
+    each process and there should be hooks to allow an external server to
+    receive messages when processes start and stop.
+
+    read() and write() should call L4 IPC directly to transfer data without
+    any involvement from the process server (unless it involves a file exported
+    by the process server). Messages that are short enough should be stuffed
+    into message registers, and anything longer should be transferred by mapping
+    pages.
+
+    There should be readreg()/writereg() and readbuf()/writebuf() functions in
+    addition to read() and write(). These should expose message registers and
+    buffers, but all three read/write APIs should interoperate, with messages
+    being auto-converted if they are a different type.
+
+    The long IPC API should also include a function to get and set a memory
+    address range to use as a buffer, since there is no kernel API for copying
+    between two address spaces (like what QNX and some older L4 kernels have) or
+    easily flipping pages between address spaces. The buffer would be mapped in 
+    all processes with that FD open. The buffer should normally be set by the
+    server (maybe only the server should be allowed to provide it).
+
+    Messages sent with traditional write() that are too long to fit in the 
+    buffer should be split into multiple buffer messages; there should be a flag
+    to indicate that a message is a continuation of a previous one.
+
+    It should not be possible for any regular server to export a port file 
+    directly. It should only be possible for the port filesystem to export them,
+    since it will maintain a central registry of port numbers (analogous to 
+    device numbers but assigned when the port file is created with no way to 
+    create multiple ports with the same numbers; the "major" will be the PID, 
+    and the "minor" will uniquely identify the port among all those created by
+    a single process). To share a port over a network, a server will create a 
+    private port filesystem, request ports in it, and transclude them into its
+    own filesystem.
+
+
+    State associated with processes should be reduced to just the PID, PPID,
+    PGID, containing cgroup, command line, and list of threads. All other state
+    should be contained in various types of context objects that are not tied to
+    a particular process or thread (other than being destroyed when no more
+    threads are associated with them). This would include:
+
+    Filesystem namespace
+    File descriptors (CSpace)
+    Address space (VSpace)
+    Security context (file permission list, UID, GID)
+    Signal handlers
+    Scheduling context
+
+    Each of these object types should be completely separate from the others,
+    allowing full control over which state is shared and which is private. This 
+    is already a good match for seL4, which has no real concept of processes,
+    only threads that are each associated with an address space, a capability
+    space, and a scheduling context.
+
+    exec() would still replace all threads within a process as on
+    traditional Unix, unless the exec is performed within a child process
+    that hasn't yet been started. 
+
+    Thread groups, processes, and cgroups should all be treated as variations
+    of a generic "team" abstraction, and teams and threads should be treated as 
+    variations of a generic "job" abstraction. APIs should be shared between all
+    of them wherever they make sense (e.g. it should be possible to signal or
+    wait for any level of job).
+
+    There should be a /proc/<pid>/wait file that produces status updates for
+    each process, sort of like in Plan 9, or the pidfd API in Linux but using 
+    the normal file APIs (the implementation of the pidfd API for the Linux
+    compatibility layer would be implemented on top of it). Holding this open
+    should guarantee that the PID won't be reused until it is closed (remaining
+    as a zombie until the wait file is closed if it exits; processes should also
+    remain as zombies if the exit status hasn't been read regardless of whether
+    the wait file is open, as in traditional Unix) in order to be able to avoid
+    sending signals to the wrong process. The normal wait() API should be
+    implemented on top of the wait file.
+
+    Instead of implementing fork() as the basic process creation primitive,
+    there should be functions for creating a completely empty process (efork()? 
+    for "empty/eviscerated fork"?; it should accept a team type
+    [cgroup/process/thread group] and an FD of the containing team) and setting
+    the active CSpace (and associated process server connection) (setcspace()?; 
+    it should be a pure library function). Switching CSpaces should switch the 
+    active set of file descriptors except for -1 (the process server connection 
+    of the calling thread's default CSpace, which should be omnipresent). There 
+    should also be calls to copy file descriptors and signal handlers between
+    CSpaces (the call to copy file descriptors could be the sole primitive for
+    duplicating file descriptors and could be used to implement dup()/dup2()). 
+    There will also have to be some sort of API for creating a CoW copy of the 
+    original address space. Starting the new process would be done through the 
+    normal thread APIs. fork()-family functions would be wrappers that create an
+    empty process, create a new thread in that proces, copy all necessary state 
+    to the initial thread, and start the thread.
+
+    The basic exec() primitive should take an optional pidfd of an empty process
+    along with the command line (if none is provided, the exec will replace the 
+    calling process, as on conventional Unix). The context objects except for 
+    the VSpace and signal handlers should just be inherited from the calling 
+    thread (making the semantics similar to on conventional Unix; a program that
+    wants to replace the context objects of the initial thread of an external 
+    process started by exec() can just start a temporary thread to change the
+    contexts, perform the exec, and exit; there should be convenience functions
+    to do this kind of thing).
+
+    pdfork()/pdforkall() and pdspawn()/pdspawnp() should be the preferred APIs 
+    for creating child processes that are copies of the parent and ones that run
+    other programs respectively (the use of fork()-family functions followed by 
+    exec()-family functions should be considered deprecated). All of these 
+    functions should return a process directory FD rather than a PID (the 
+    non-pd fork()/spawn()-family functions should just wrap the pd*()
+    equivalent).
+
+    The base Rust API for process server connections should have all calls
+    implemented as methods on a process server context struct visible to user
+    code, in order to allow use of multiple contexts without having to
+    constantly switch. The bare function versions of process server calls should
+    operate on whichever connection struct has been set as the default.
+
+    All process memory (even things like stack/heap/BSS that are anonymous in
+    other OSes) should be mapped from memory-resident files. Backing for
+    stack/heap/etc should be provided by memfs, which would be internal to the
+    process server. Each VSpace should have a memfs associated with it. It 
+    should be possible for sufficiently privileged processes to create memory
+    files that map specific physical address ranges (for access to boot
+    images, ROMs and I/O memory). The structure returned from stat() should
+    contain a flag indicating whether a file is memory resident (this should
+    probably be an unused bit in the mode, but it should definitely not be a
+    part of the type code). ls -l should indicate which files are memory 
+    resident. All memory-resident files (including ones shadowing non-resident
+    files) should have a paging priority, with the highest locking a file in
+    memory, and the lowest causing the contents to be completely erased from
+    memory if physical memory is low rather than being swapped out (this would
+    be useful for things like caches, which don't make sense to swap out; for
+    shadow files, this should only erase the in-memory pages, and not the
+    backing).
+
+    Since it would be possible to create files that map specific ranges of other
+    files in a memfs, it would be possible to implement XRFS and the like
+    without a separate server. All that would be necessary would be a mount_xrfs
+    command that sets up a memfs and populates it with files that map specific
+    ranges of the image. It should be possible for a sufficiently privileged
+    process to make a memfs instance permanently read-only after it has
+    populated it.
+
+    Both private mappings of files as well as mappings of non-memfs files could
+    be implemented with a special type of "shadow" memfs that pages in data from
+    backing files, rather than allocating cleared backing pages like a normal
+    memfs. Each file in a shadow memfs should be able to have a different
+    backing file. If the backing file is already memory-resident, new pages
+    should only be allocated if they are written to and the file is a private
+    mapping. There should probably be a maximum depth of recursive shadow files
+    to prevent creating shadow files that take a long time to access. Processes
+    should only be allowed to create shadow mappings with the same or lower 
+    permissions that they have to the original, and they should only be allowed
+    to create executable mappings of files to which they actually have execute
+    permission (this should include both the permissions specified when the
+    mapping is created as well as setting them after the fact with mprotect()).
+    If a shadowfs file shadows a file in another memfs, the original filesystem 
+    should be kept around until the last shadowfs referencing it is destroyed.
+
+    Heap/stack memory allocation should be implemented with a tmpfs backing and 
+    a shadowfs on top of it in order to allow for copy-on-write. Direct
+    allocation of anonymous backings in shadowfs shouldn't be necessary with
+    this arrangement.
+
+    The proc call for mapping files (mmapr) should be simpler than POSIX mmap(),
+    and should only support shared mappings of memory-resident files. mmap()
+    would be a wrapper around the proc call. Private mappings and mappings of
+    non-memory-resident files would be implemented by creating files in a
+    per-process shadowfs. Anonymous mappings would be implemented by
+    creating files in the same memfs that is used for the stack and heap.
+
+    It should be possible to have a file memory mapped without it being open for
+    messages, although even when that is the case there should still be a file
+    descriptor reserved for it (maybe the descriptor should be moved to the
+    upper half of the positive part of the address space if a file that was open
+    for messages is closed while it is still mapped). 
+
+    A resource trading mechanism that is mostly transparent to clients should be
+    implemented. This would limit the ability for clients to perform DoS
+    attacks by causing servers to allocate memory, and would make handling OoM
+    situations easier since allocations by a server on behalf of a client would
+    count against the client's memory usage, not the server's. For each client
+    that connects, a server that wants to use delegated memory would be provided
+    with a capability to an in-memory filesystem (not necessarily the root of a
+    filesystem; any in-memory directory will do) from which it can allocate
+    memory for objects unique to that client. By default this would just be a
+    subdirectory in the client's heap tmpfs (meaning allocations from it
+    would be subject to any quota imposed on the client), but it will be
+    possible for clients to override that (allowing them to reduce the quota for
+    instance). Allocations that are not specific to a particular client would
+    normally come from the server's main heap filesystem instead. 
+
+    In order to deal with an allocation that gets dropped (either due to the
+    client exiting or low physical memory) there should be an API to lock the
+    allocation from getting dropped (which will return failure if it already was
+    dropped), as well as a corresponding API to unlock it. This would only
+    prevent it from getting dropped and not from getting paged out.
+
+    Unified buffer/page cache should be implemented by allowing the pager to
+    provide a locked-in-memory tmpfs file to a server (the server should be able
+    to specify that it appear below a particular physical address) and having
+    the server reply to page requests with the offset of the page within the 
+    file rather than by using direct reads and writes (although direct reads and
+    writes should still be supported if the server doesn't set up unified cache,
+    and all unified cache paging messages should still be transferred with
+    normal reads and writes of course). There will also have to be an API to
+    invalidate a previously-requested page, and messages the pager can send to
+    indicate that it no longer needs a page or needs to shrink the unified cache
+    file.
+
+    There should be a generalized API for resource limits in /proc/<pid>/limits 
+    with one file per limit type (limits for things like physical memory ranges
+    should be subdirectories instead).
+
+    Instead of a character device, /dev/mem should be a filesystem (implemented 
+    as a special singleton "physmemfs" variant of memfs) containing direct
+    mappable regular files, one per device untyped object exported by the
+    kernel (there shouldn't be much of a need to export RAM untypeds). Creating     a memfs with files that map arbitrary physical address ranges (for things 
+    like PCI bus access servers and window servers) should be supported by 
+    creating a shadowfs and mapping the appropriate file in /dev/mem at the
+    offset needed.
+
+    tmpfs and shadowfs should have separate APIs for creating them, and
+    it shouldn't be possible to mix normal files and shadow files in one memfs.
+
+    Process permission list entries that use the permissions from the
+    filesystem should use the permission bits as a bitmask to allow forcing
+    permission bits off.
+
+    File modes should be extended to 32 bits, and should include a "minor type"
+    field in addition to the normal (major) type field present in conventional
+    Unix. This should be used to distinguish additional semantics for certain
+    file types.
+
+    Major file types with subtypes:
+    
+        Pipes: character-oriented, message-oriented
+        Character-special files: regular, terminal
+        Directories: (no subtypes)
+        Block-special files: (probably no subtypes)
+        Regular files: message access only, memory-resident
+        Symlinks: (probably no subtypes)
+        Sockets: connected character-oriented, connected message-oriented, 
+            connectionless message-oriented
+        Message-special files: regular, port, non-mountable capability special,
+            interrupt channel
+
+    There should be message-oriented devices in addition to character and block
+    devices, and message-oriented pipes (or mailboxes) in addition to
+    character-oriented ones. A write() to a message-oriented device or pipe
+    should always write one message, and a read() from one should always return
+    one message. If the buffer size given to read() is smaller than the message 
+    that's available, it should read enough of the message to fit into the
+    buffer and set errno to a new "ETRUNCATED" value (this value should never be
+    set for non-message-oriented files). The next read after a truncated one
+    should produce only the remainder of the truncated message. Ports and
+    non-port capability special files should have the same semantics as 
+    message-oriented devices.
+
+    There should be *v() versions (openv(), statv(), etc) of all process server
+    calls, to allow for operating on multiple files in a single call
+    (filesystem-related functions that require process server involvement will
+    very likely have worse performance than on a conventional Unix, so combining
+    multiple calls into one might be a good optimization for programs that have
+    to operate on lots of files). The non-v versions should be implemented as 
+    wrappers around the v versions.
+
+    There should be an API for transferring file descriptors between processes.
+    This should be implmented with a "capability special" message-oriented file 
+    type for transferring FDs. Any process should be able to export any number
+    of these. Transferring an FD would be done by writing the FD number followed
+    by arbitrary data (i.e. inode number etc. for local FDs on ports, or the
+    address for sockets). It should be possible to send data over these files
+    without transferring an FD by using a negative FD number (negative FDs are
+    reserved for use in a single process and shouldn't be transferred). On seL4,
+    the FD-transferring semantics would be implemented in libroot (on the
+    sending side it would look at the FD number, look up the kernel
+    capabilities, put them into a message, and send it, blanking out the FD
+    number, and the receiving end would unwrap the capabilities to make a new FD
+    and fill in the new FD number in the receiving process). Ports should be 
+    one type of capability special file but there should be a different type for
+    non-mountable capability special files to distinguish them from mountable
+    ports.
+
+    Similarly, there should be an API for processes to grant (and revoke) access
+    to specific paths to which they have access. This should probably be 
+    implemented as a special file that allows a sending process to grant access 
+    to an absolute path in its namespace by writing the path to it, optionally
+    followed by a permission mode in order to reduce the permissions from those 
+    of the sender (attempting to specify more permissions than the sender has 
+    should obviously make the grant attempt return failure), and get back a 
+    grant ID by reading it afterwards (this file should be called something like
+    /proc/<pid>/grant, so that processes can only grant access to processes to
+    which they have permission), and a directory of granted paths with a name 
+    like /proc/self/grants; subdirectories of this directory should have grant 
+    IDs as their names and contain three entries - target (a transclusion of the
+    target, updated on any open() or stat() to reflect the actual file at that
+    path at the time of the call), path (the original path in the sender's
+    namespace, for informational purposes only), and pid (which should give the 
+    PID and return a pidfd for the granting process). A call to 
+    open("/proc/self/grants/<grant ID>/target", <flags>) in the receiving 
+    process should be treated exactly as if the sending process did an
+    open("<target>", <flags>) (the flags would not be changed at all from what
+    the receiving process used), using the namespace of the sending process 
+    and subject to its permissions (including UID/GID if the permission list 
+    entry is one that uses the FS permissions) rather than the receiver's (or if
+    the sender reduced the permissions, it should be subject to the reduced
+    permissions instead). If an entire directory is granted, all operations on
+    all files in the directory should use the permissions of the sender 
+    (similarly, if the permissions are reduced, they should limit the maximum
+    permissions on any file in the directory). There should also be some way to
+    reduce permissions of a specific file in a directory grant (without 
+    affecting permissions of any other files within it). If the underlying path 
+    is deleted before the receiving process opens it, 
+    /proc/self/grants/<ID>/target should disappear, reappearing if the path is
+    re-created. Basically this mechanism is a secondary form of capability that 
+    references paths, unlike FDs, which reference connections.
+
+    There should probably be some kind of mechanism to grant access to files 
+    based on command line arguments, although this should not be implemented in
+    the process server itself, but rather in a hook that parses the arguments
+    and grants files to the new program accordingly. Programs using this 
+    mechanism would basically always have all or most inheritable permissions 
+    masked off in the permission database.
+
+    Permission lists should be able to specify files either by path (like 
+    AppArmor) or by label (like SELinux). Making links to files should require 
+    access to the target of some kind (there should be a "make symlink" bit on 
+    permission list entries in addition to the rwx bits), and when performing 
+    any operation on a symlink that accesses the target, the permissions should 
+    be checked on the target as well as the symlink.
+
+    The local file IPC protocol could mostly correspond to 9p, although
+    obivously messages that refer to open file descriptors should be received on    separate FDs, not multiplexed onto the port like in Plan 9. Since there will
+    be separate channels for read and write, they should be implemented as the
+    same message type.
+
+    Basic (transport layer) message types:
+
+        data transfer:
+        data_short (in registers)
+        data_long (in long IPC buffer)
+
+        status:
+        read (should contain an offset like in 9p; seek should generate a 0-length read with the specified offset)
+        flush (maybe should be a generic fcntl instead; in that case libroot's function for it should fail on bogus flags to prevent them being used in place of normal writes)
+        clunk (should carry an error number because it could be called on a fatal error as well as on close; the error should be 0 on close)
+        error (a successful write will generate one of these with errno set to 0)
+
+    Port (VFS layer) message types (encapsulated in data messages sent over a port; messages other than open and create should operate on inode numbers, and directory entries returned by servers should contain inode numbers):
+        version
+        open (transfers an FD)
+        create (transfers an FD; the FD field of messages other than open and create should be 0)
+        remove
+        stat
+        wstat
+        update? (for push updates to directories for inotify and caching)
+
+    There will have to be a flag to make an FD act as a server-side FD. It
+    should at least keep write()-family functions from waiting for a backchannel
+    reply (having servers require a backchannel reply from clients would make
+    every message into two).
+
+    If possible, number of FDs for each process should only be limited by memory
+    quotas, without any kind of arbitrary limit. If there is any need for an
+    arbitrary limit, further attempts to receive FDs should return failure until
+    already-open ones are closed to free up space.
+
+    By default, directory entries should be cached by the process server. There
+    should be a flag to mark directories as uncacheable. There should be a
+    message type to invalidate the cache for an individual directory (there
+    shouldn't be a need for a push update message that carries an actual update;
+    the process server can just re-request the cached directory if necessary).
+    Opening a directory should cause the entire directory to be fetched. This
+    should hopefully mitigate the overhead of the process server acting as an
+    intermediary on directory accesses.
+
+    Reading directories should maybe be implemented by reading some kind of 
+    magic path (maybe something like dir/.__dircontents__?) instead of a direct
+    open on the directory itself; this would allow for servers to export files
+    that behave like a normal file when opened with open() but a directory when
+    opened with opendir(); this would make something like BTRON-style compound
+    documents easier to implement in a way that's relatively compatible with
+    naive programs (the document would be something like a zip file and a 
+    translator would overlay it with a directory view), among other things
+
+    It should be possible for a server to include memory-resident files 
+    (exported by the process server) for which it has privileges in its
+    directory listings (this should be implemented through a generalized "firm
+    link" API). It should be possible to export a file that maps only a limited
+    range of another memory-resident file (maybe one file should be able to
+    contain multiple disparate blocks of pages from the same file; this would
+    make it easier to implement an in-memory filesystem in a machine with a
+    universal memory). It might also be a good idea to allow changing the
+    backing of such files for any process that has them open as well as for new
+    opens). There probably wouldn't be a need for exporting arbitrary memory
+    blocks to allow other servers to implement memory-resident files directly.
+
+    It would probably be a good idea to add a limited form of translator API. 
+    Unlike that of the Hurd, translators should be filesystems mounted over the
+    path containing files for them to handle. The only difference would be that 
+    they would hook files with certain attributes rather than exporting any 
+    files themselves. This would allow for things like saved searches, without
+    the security risks or configuration issues that Hurd-style passive 
+    translators would bring. Translator filesystems could be implemented without
+    any special hooks, but this would require them to intercept all directory
+    accesses and would make caching significnatly more difficult. Adding an API
+    to hook files by attributes would increase performance on directory 
+    accesses.
+
+    Parts of the process server with file interfaces (like the process
+    filesystem and core capability manager/filesystem) should probably be
+    implemented as modules (however, these modules should simply be
+    statically linked into the process server) resembling "colocated
+    servers", with a well-defined interface for interacting with the
+    core VFS part of the server (for instance, the capability
+    manager could use a generalized mechanism for hooking file
+    access calls; exporting files could be implemented with pretty
+    much the same API as standalone servers).
+
+    There should be an API for hooking file access calls (file-based of
+    course), and it should be possible to only hook open/close calls with
+    specific parameters (e.g. file type, option flags, etc).
+
+    Permissions should have "effective" and "inheritable" flags,
+    which should basically do the same thing as the effective and
+    inheritable sets in POSIX "capabilities" (except that all
+    permissions would be in one set, with flags determining the
+    status; the equivalent of a capability in the "permitted" set
+    but not in the others would be one with both "inheritable" and 
+    "effective" flags off). A compatibility library that translates
+    POSIX "capabilities" into UX/RT permissions should be provided.
+
+    A compatibility library to allow UX/RT to use FUSE servers should be
+    implemented. It could probably be based on the official FUSE library 
+    with the character device backend replaced with one using the native
+    UX/RT VFS interface (fusermount would obviously be completely
+    unnecessary).
+
+    There should be a secondary global namespace consisting of fixed prefixes of
+    the form /:<prefix>/ which should not show up in the normal root but should 
+    otherwise act as normal directories (including being subject to permission 
+    lists just like any other path of course). Prefixes should be used instead
+    of a general hierarchy for the global namespace in order to simplify the 
+    implementation and also to make it harder for third-party software to depend
+    on its structure (the use of transient identifiers will further limit the 
+    potential for misuse).
+
+    Global namespace structure:
+
+    /:fs/<port number> - base mount points for filesystems
+    /:inode/<port number>/<inode number> - access a file by inode number
+    /:ns/<PID> - access the namespace of another process
+
+    Ports should only be mounted into the global namespace and not directly into
+    the normal root, and it should not be possible to specify a destination (the
+    destination should of course be set automatically based on the port number).
+
+    Mounting ports in the global namespace and binding directories under the
+    process root should both be implemented by writing the source, destination 
+    (only for bindings, not for global mounts), and options to a file 
+    (/sys/servers/proc/mounts for global mounts and /proc/<pid>/bindings for 
+    process bindings; these files should return a list of mounts when read; all 
+    successful writes should act as appends even if the file was opened for 
+    truncation). Both mounting into the global namespace and binding under the 
+    local root should require write permissions for the destination, as well as 
+    both read and write permissions to the port for global mounts and at least
+    read permissions for bindings (if a permission to the source is missing it
+    should not be allowable for the destination either; however, the check for
+    the source's permissions should only be performed when binding and
+    afterwards only permissions for the destination should be checked).
+
+    It would probably be a good idea to forbid control characters in filenames.
+    It might also be a good idea to treat all filenames as UTF-8 like OS X does
+    (although some characters have multiple representations in UTF-8, so dealing
+    with them might be a bit tricky).
+
+    There should be a minimal filesystem to expose the Multiboot modules as
+    files; this should be built into the process server and mounted on the root
+    during process server initialization (it should probably just be implemented
+    as a read-only shadowfs). The process server should just run /sbin/init as 
+    process 1 and let it handle everything else including mounting the boot 
+    image (everything required to mount the boot image would have been passed as
+    a module).
+
+    There should probably be some kind of generalized facility for saving and
+    restoring processes, in order to implement stuff like hibernation. This
+    could probably also be used to make the ELF loader external to proc,
+    although that would make booting a bit more difficult. Ideally this should
+    also be usable for a checkpoint-based process persistence facility although
+    checkpointing should be optional since it would interfere with real-time
+    applications (and couldn't be implemented as a fundamental part of the
+    system as in KeyKOS since disk drivers will be normal processes).
+
+    Hibernation should be implemented by saving all processes other than init to
+    an image file. The bootloader script should check for a hibernation image 
+    and load it along with the supervisor image if a hibernation image is
+    present. The pre-startd rc script should check if a hibernation image was
+    loaded and restore processes from it rather than starting a new startd
+    process (if the hibernation image can't be loaded for some reason, an error
+    message should be displayed and normal boot sequence performed).
+
+    Frequently-allocated process server objects of fixed maximum sizes should
+    probably be allocated from type-specific "buckets" that then allocate from 
+    the main slab allocator in larger increments. This would reduce 
+    fragmentation significantly. Both fixed-size objects and variable-size
+    objects of fixed maximum size (like paths) could be allocated this way.
+
+Init system:
+    /sbin/init itself (run as PID 1 like in a conventional Unix) should be
+    something like a cut-down sysvinit (similar to in SMF) that runs startd
+    (which then starts basically all the other daemons and boot scripts), rather
+    than a full-featured service manager like in most next-generation init
+    systems. This allows it to act as a failsafe in the unlikely event of a
+    startd crash without any signal handler trickery like in systemd; init 
+    itself would be almost immune to crashing after startd is running since only    runlevel change (i.e. shutdown or switch to single user mode) or abnormal
+    startd shutdown will unblock it (reaping processes with parents that no 
+    longer exist will be handled by whatever restarter process created their
+    cgroup). It should be possible to run init as a normal command to change
+    runlevel, although there should be only one multi-user runlevel. init could 
+    probably export a file in /sys that allows startd to watch for
+    runlevel changes so there don't have to be entries in inittab to notify
+    startd (inittab would just contain a wait entry to mount the boot image with
+    mount.xrfs, a respawn entry to run startd, and probably an entry to run a 
+    script to make sure no processes are left over on halt or reboot and display
+    a warning if there are). Halting or rebooting should just be implemented by 
+    init exiting (proc would determine whether to halt or reboot based on the
+    exit status). There should be no need to support re-reading inittab after
+    startup, since startd and other second-stage restarters will manage
+    everything but the initial startd instance.
+
+    Other restarters besides startd (which will handle only unconditional
+    one-shot and daemon units) should include eventd, cron, and inetd. Both cron
+    and inetd should work somewhat like they do in tradtional Unix, although
+    only dealing with native units (parsing of crontabs and inetd.conf should be
+    done with external programs that parse them into units). eventd would be a
+    generic event manager, running one-shot units (daemon units to be started on
+    events could be templates that create transient startd units) in response to
+    events, which could be either file creation/change (using inotify) or
+    injected by an external program. Attempted access of currently non-existent 
+    paths, causing the accessing process to block until the unit finishes (akin
+    to demand loading of modules on Linux) should also be a supported event
+    type, although it might be best off in a separate daemon that injects events
+    into eventd. Dependencies declared on units managed by any of these
+    non-startd restarters should only check that the target unit exists (or does
+    not exist in the case of a conflict), and should not cause it to run. Only
+    dependencies on units managed by startd should cause the target unit to
+    start/stop.
+
+    None of the restarter daemons should contain support for parsing unit files.
+    They should simply provide an interface to add new units, and the unit files
+    should be parsed by a program that loads the unit files into the appropriate
+    daemon. This would make dynamic generation of services easier, and would
+    also reduce the amount of code contained in the daemons of the init system.
+    Likewise, there should be no direct support for legacy System V init
+    scripts in startd, and it should be implemented by a program that generates
+    units from System V-style scripts (there should be support for watching for
+    a PID file to determine if the service is ready and killing the cgroup if
+    the PID specified by the file dies; this should only be supported for legacy
+    scripts, and could probably be implemented with some kind of helper rather
+    than in the core library of the init system).
+
+    There should also not be any built-in support for the unit file options that
+    control the environment of a daemon (private /tmp and the like). There could
+    possibly be options to run scripts before and after startup and shutdown to
+    produce the same effect. The environment-related options could possibly be
+    implemented with hook scripts run before the daemon is executed. These
+    might best be handled by translating them into environment variables passed
+    to the hook scripts. or possibly by some kind of configurable mapping of
+    options to scripts.
+
+    There should be a concept of unit templates to allow dynamically spawning
+    daemons with different options (e.g. by an event unit; there shouldn't be
+    any support for anything other than one-shot event units)
+
+    Cyclic dependencies should be treated as hard errors, and any units that are
+    part of a dependency cycle should stay in a failed state until the cycle is
+    repaired manually. There should be no attempts to automatically fix cycles
+    by dropping units like systemd does, unless it can be trivially determined
+    which unit caused the cycle. It might also be possible to have some kind of 
+    external helper program that saves the dependency graph and compares its
+    current state to the last state in order to be able to fix more dependency
+    cycles.
+Logging/monitoring:
+    syslogd should be a new implementation that adds some features not found in 
+    traditional BSD-style syslogd implementations. It should be possible to add 
+    metadata tags to messages (for use by GUIs and other utilities). Unique 
+    application and message IDs should be supported (application IDs should be
+    reversed DNS rather than UUIDs, and message IDs should be just free-form
+    strings). A binary message index file should be provided for quick lookups, 
+    although the main log file should still be text. A facility to allow a user 
+    to reply to a message should be provided (this could probably be a separate 
+    daemon from syslogd).
+
+    A lightweight monitoring system compatible with a subset of Nagios should be
+    included by default. The core daemon should just run monitoring plugins and 
+    publish results, and shouldn't have any built-in support for networking or 
+    multiple users (these would be implemented in another daemon). By default,
+    there should be service entries for common items like disk space and 
+    available RAM/swap.
+Shared segment filesystem:
+    This filesystem should allow accessing XIOS shared segments as files, as
+    well as creating new shared segments. Should probably be implemented as
+    something like a bus access server
+Disk filesystems:
+    ZFS-FUSE could probably be ported relatively easily using the FUSE
+    compatibility library.
+
+    If an encrypted root is in use, the boot image should be stored in the
+    encrypted root partition rather than the non-necrypted boot partition. The
+    bootloader should add a tag to the Multiboot info with the password so that
+    it doesn't have to be entered twice (this tag should get overwritten by the 
+    boot scripts as soon as the root is mounted to prevent the password from
+    getting stolen).
+
+    It should be possible to configure the disk server to optionally allow 
+    running separate processes for different layers for situations where 
+    completely separating access to partitions or LVs is desired (e.g. a lower 
+    disk server process with the disk driver and partition driver and an upper
+    process with the filesystem driver).
+
+    A new disk filesystem should eventually be written. It should have support
+    for checksumming, pools, and volume management comparable to ZFS and support
+    for database-like features, transactions, and plugins comparable to Reiser4
+    (possibly Reiser4 itself could be forked, renamed, and used as a starting
+    point, with the first change being a different magic number and a reset of
+    the version). The transaction support should be exposed to clients (which 
+    should be a little easier than on Linux since the VFS layer will be more
+    lightweight). It might be good enough to just use a RAID layer separate from
+    the filesystem itself rather than trying to integrate one into the FS.
+Network stack:
+    The NSS/DNS resolver should be a server with an interface library (the
+    equivalent of libnss_files could be implemented in the library at least as a
+    fallback for recovery or early boot situations when the NSS server isn't
+    running), rather than a pure library as on typical Unices. The interface
+    library should provide an asynchronous API (allowing the use of 
+    select()/poll()) of some kind (which should be easy enough to do with a 
+    server/device-file-based NSS) in addition to the standard Unix synchronous
+    resolver API. A command to manually clear the NSS server's cache should be
+    provided. For domain resolution there should also be an overlay for the
+    socket filesystem that allows opening sockets with hostnames directly rather
+    than having to resolve them first and then open a socket with the resolved
+    address.
+
+    Similar to the disk stack, it should probably be possible to configure the 
+    network stack to separate layers into different processes. The default 
+    configuration should probably run one network stack process per device.
+Clustering subsystem:
+    This should be implemented as an intermediary between client processes and 
+    the process server. There should be an API to control which node new 
+    processes run on, which should also have an option to allow running on any 
+    node. It might be possible to use something like the Plan 9 cpu protocol,
+    although that may not be enough for a more SSI-like clustering model where 
+    processes can be run on any of several CPU server nodes.
+Unix command environment, API, ABI:
+    Instead of requiring user programs to be linked with it, the low-level
+    system call library (libroot.so.*) could instead possibly use a jump table 
+    for its entry points in order to allow more flexibility when it comes to
+    linking and ABIs. This also would eliminate the issue of either having to 
+    include the dynamic linker in libroot or requiring direct syscalls in the
+    dynamic linker. The address of the jump table would probably best be passed 
+    in a register to the user program's entry point, in order to allow ASLR for
+    libroot.
+
+    libroot should have a function to get the minimum stack size that it
+    requires, so that language runtime libraries know what stack size to use.
+
+    System calls outside of libroot should not be permitted. This will probably
+    have to be implemented with a kernel patch that allows setting a virtual
+    address range for code that is permitted to make system calls. It should be
+    possible to easily catch system calls from outside the permitted range in
+    order to make the Linux compatibility layer (and any other system call
+    compatibility layers that may be added) easier to implement.
+
+    libroot should be included in the supervisor image under /boot/<subarch> 
+    and loaded from a fixed namespace including only the files passed to the 
+    process server in the MBI (regardless of the namespace that the program will
+    actually run under) rather than being placed in /lib, in order to ensure
+    that the correct version for the running supervisor is always used (since
+    different builds of the same kernel may have incompatible ABIs). The dynamic
+    linker filename would be specified as a relative path without any 
+    directories, and the process server would check that it is of the form 
+    lib*.so.? and match it against all such files in the directory containing
+    the process server binary itself within the MBI namespace.
+
+    Some form of stable shared library ABI for Rust should be supported (see 
+    e.g. https://github.com/rodrimati1992/abi_stable_crates and 
+    https://internals.rust-lang.org/t/a-stable-modular-abi-for-rust/12347) as 
+    well as a utility for easily generating a C API for a Rust library. The 
+    stable Rust ABI should only be used for libraries that are large and/or 
+    security-critical though, and most Rust libraries should continue to only 
+    be provided in static form (static linking should also be preferred for 
+    simpler C libraries as well).
+
+    Rump kernels from NetBSD should be supported. The network stack and disk
+    filesystem servers could be implemented using them (UX/RT glue layers for
+    them would probably be relatively easy to implement).
+
+    LKL <https://github.com/lkl/linux> should also be supported (it's more or
+    less a Linux kernel equivalent of the rump kernel). The same glue layers
+    could probably be used for both since both export Unix-like APIs (although
+    the glue code will have to take the differences between the NetBSD and Linux
+    APIs into account).
+
+    Regardless of the driver in use, the disk filesystem server should always
+    use its own partition handling layer based on that of Linux (but with a
+    device naming scheme similar to IRIX - /dev/dsk/<driver><n>t<n>d<n>p<n>s<n>
+    (e.g. /dev/dsk/scsi0t0d0p0s0), with all numbers except for adapter and
+    partition droppable if they don't apply to the particular driver (if only
+    one device per adapter is supported the adapter number becomes the device
+    number). LVM volume groups should be under /dev/dsk/lvm/<volume group name>.
+
+    ioctl() should be implemented as a function that attempts to open a control 
+    channel by opening a file with the name of the file associated with the FD 
+    it's called on with ".ioctl" added to the end (it should error out with 
+    EINVAL if there is a file with this name that's not a device file, in order 
+    to avoid clobbering regular files), writes the request to the open file,
+    reads the reply, and closes the control channel file. It will also have to
+    have some way to identify the primary FD that the ioctl request was
+    associated with (either provide the FD number used by the client on open, or
+    have functions to convert between internal IDs and FD numbers).
+
+    There should be a special filesystem for ports similar to /srv under Plan 9
+    (it should be mounted on /ports by default since /srv is already defined as
+    something completely different in the FHS). The semantics should be similar
+    to under Plan 9 (writing a file descriptor into a new file produces a port),
+    but subdirectories should be created automatically when a port path includes
+    them, and deleted when the last port in them is closed (making directories
+    directly shouldn't be permitted).
+
+    There should be separate mountport and bind commands for mounting ports
+    in the global namespace and binding directories under the process root. The
+    mount command should be a wrapper around mountport, bind, and
+    server-specific mount commands. mount -t <type> should call mount_<type>,
+    which should start the appropriate server and return the port name on 
+    stdout. All disk filesystems should be mounted through a mount_disk command
+    that is symlinked to mount_<filesystem> for all supported disk filesystems
+    (if called as mount_disk, it should try to auto-detect the type; if called
+    as mount_<type> it should only mount it as that type).
+
+    Some of Plan 9's utility library functions could probably be ported, either
+    as part of libc, or as part of another library.
+
+    Regardless of locale, the default sort order should be purely by Unicode
+    codepoint (except for in the "C" locale where it would be by 8-bit character
+    value). Sequences that are invalid in UTF-8 should be treated as individual
+    bytes and should sort after all UTF-8 characters. There should also be a way
+    to get language-dependent sort order (although at the very least this should
+    not ignore non-alphanumeric characters and probably should be
+    case-sensitive).
+
+    There should be a chpriv command for escalating privileges (it should be the
+    preferred way to do it). It should add privileges to the session from
+    which it is run (usually a terminal window or virtual console terminal) or
+    to a single process, but should NOT affect any other sesssions of the user
+    running it. There should be a list of permitted privileges or roles for each
+    user (which probably wouldn't be a part of chpriv itself but rather part of
+    a daemon), and this would be the primary way of controlling which users can
+    do what. There should be a sudo command that is a script wrapping chpriv,
+    which would run a single command with escalated privileges. It should be
+    possible to configure individual roles to require passwords. The su command
+    should behave similarly to the conventional Unix version (although the root
+    account would just be a normal user account with all roles permitted;
+    however, running programs as root some way other than through su should not
+    give them full privileges).
+
+    There should be security hook scripts for bash and zsh that work in a
+    somehwat similar way to completion hook scripts. They should parse the
+    command line and hand out only the privileges needed to access the files
+    specified on the command line. If no such script is present, the command
+    should just get the shell's privileges by default.
+
+    /etc/passwd should be a dynamic filesystem backed by an underlying master
+    password database. The master password database should be in a format like
+    the tcb format (https://www.openwall.com/tcb/), with a separate file for
+    each user, in order to allow users to change passwords without having to
+    give programs that change the password access to a file with all user 
+    passwords. It should be possible to associate arbitrary keys and values with
+    user accounts. There should be separate per-user files for public and 
+    private information. There should be some kind of verification of 
+    modifcations to the user database so that users can't corrupt their part of
+    it and prevent themselves from logging in.
+
+    All servers which export stuff in /sys should use a standard interface, and
+    there should be a sysctl function for accessing stuff in /sys (it will have 
+    to be like sysctlbyname since regular sysctl takes indices instad of names,
+    and UX/RT will lack indices since it will be purely implemented through 
+    /sys). A separate function should allow for repeatedly reading an entry
+    rapidly.
+
+    There should be a separate "tty" server responsible for tracking
+    controlling terminals and handling /dev/tty rather than having the process
+    server track them. This should use the process server's API for hooking
+    open/close calls to only intercept those on terminals.
+
+    Augeas <https://augeas.net/> or a reimplementation should be part of the
+    base system and should be used by anything that programmatically modifies
+    system configuration.
+
+    The boot image builder (mkbootimg) should probably be a shell script. 
+    Configuration files should go in /etc/bootimg and configuration files
+    meant to be used directly should have all-caps names like BSD system
+    configuration files.
+
+    mkbootimg configuration directives:
+        kernel        Specifies the kernel binary to use
+        proc          Specifies the process manager binary to use
+        module        Specifies a file to be loaded as a boot module
+        add           Specifies a file or directory to be added to the image
+        include       Includes another configuration or fragment
+
+    Shell and listener:
+        The standard shells in early versions should be ash as the default shell
+        for scripts (installed as /bin/sh) and zsh as the default interactive 
+        shell. bash should also be installed by default since it is commonly 
+        used for scripts in Linux. tcsh should be available, but not installed 
+        by default. 
+        
+        Eventually a new Bourne-compatible shell should be written. Unlike 
+        most existing shells, this shell should not implement things like 
+        completion or editing itself. Completion and editing should be instead
+        implemented in a separate "listener" program that is sort of akin to 
+        that in Multics (although using FS-based IPC rather than procedure calls
+        to communicate with the shell of course). The listener should be 
+        extensible, with the core process being as policy-free as possible and
+        all the policy being implemented in external modules. The shell will 
+        need to have hooks that allow it to interact with the completion and
+        editing features of the listener, and the listener's API for this should
+        of course be open to other programs as well (this will replace 
+        libreadline and the like; an API-compatible libreadline replacement that
+        uses the listener's API should be provided).
+
+        The main I/O interface provided by the listener should be a standard 
+        terminal device that still allows programs to do raw terminal I/O 
+        (when a program using raw I/O is running, the listener should operate 
+        in passthrough mode and turn off its UI features). The API for the 
+        extended UI features should probably be implemented with separate files
+        alongside the main terminal device.
+
+        PowerShell-like object-oriented features could possibly be supported, 
+        but instead of having commands implemented as plugins, a standardized 
+        text-based serialization format (probably JSON) to pass objects between 
+        programs using regular pipes should be used instead.
+
+    Command regularizations/splits/etc.:
+        - All commands should accept "--" to signal end of options
+        - All commands that can operate on multiple files should have an option
+          to read a list of files from a file, with "-" to read the list from
+          stdin. 
+              * This would be faster than using xargs since the command could
+              start reading from the pipe before it receives an EOF
+            * It might not be possible to make the single character short option
+              consistent across commands but there should maybe be a consistent
+                long one (something like --file-list).
+              * It might be a good idea to have a version that uses null as a
+                separator instead of newline. However, if control characters in
+                filenames are forbidden, this would probably not be necessary.
+        - Related to the previous one, commands shouldn't implement recursion
+          into subdirectories themselves. All commands that operate on multiple
+          files should have a recursive version implemented as a script that
+          pipes the output of find to the normal version as a file list.
+        - All or most of the options of cat could be split off into separate
+          commmands
+        - The base "ls" binary should be renamed to "l". It should have somewhat
+          similar behavior to Plan 9's "ls" (files are listed one per line). 
+          ls should be a script that wraps l and implements (at least) the -1
+          and -C options (using some equivalent to "mc" under Plan 9, which will
+          have to have a different name (mcf for "multi-column format"?) to
+          avoid conflicting with Midnight Commander). Hiding dotfiles could
+          possibly also be implemented in ls rather than l, by piping the output
+          of l to grep -v '^\.' 
+        - There should be an "lshw" command that lists all hardware. It
+          should be implemented as a script and should not have hardcoded
+          support for particular buses (it should call bus-specific commands
+          when necessary). Likewise, the hardware-specific commands - lspci,
+          lsusb, lsxios, lsxenbus, lscpu, etc. should probably be implemented as
+          scripts.
+        - uname -m should return the platform (e.g. pc) and uname -p should
+          return the CPU architecture including the subarchitecture (e.g. 
+          x86_64-nehalem, or x86_64-unknown for a subarchitecture not known to
+          the running version). -o should be a synonym for -s and -i should 
+          return the specific model name of the machine (or "unknown" if it
+          can't be determined)
+    
+    Multiple universe and container support:
+        Normal universes using dpkg for package management should be dynamically
+        generated from stuff in /pkgs/store using a package filesystem that
+        exports firm links to all files in every package installed in that
+        universe. The package filesystem could probably be implemented using a
+        normal unionfs server or even maybe built-in unions, with appropriate
+        hooks in apt, dpkg, and related commands to propagate changes.
+
+        To allow programs to call programs from a different universe, a
+        wrapper should be implemented that checks its name, switches to
+        the correct universe, and execs the program specified by the
+        name to which the wrapper is linked. In universes other than 
+        their own, programs would be replaced by symlinks to the 
+        wrapper. 
+
+        It should be possible to have multiple containers per universe much like
+        images and containers in Docker. Each could include any number of local 
+        overlays for things like /home, /local, etc/ and /var. Containers that
+        only virtualize the disk would just use the main local overlays by
+        default. The "base" container at least should have binaries from
+        all universes visible by default and it should be possible to set up
+        alternate containers with everything visible as well.
+
+        There should be support for "hosted" universes for compatibility with
+        non-Unix-like OSes (this would mainly be used for Wine). These would be 
+        dependent on a compatibility layer running in another universe.
+    ABI:
+        All binaries should be built with sections page-aligned relative to each
+        other and the beginning of the file in order to allow for XIP.
+        Everything else should be the same as Linux if possible. A "pagealign"
+        command should be provided, which should page-align binaries built by a
+        toolchain that isn't configured to page-align binaries (such as a Linux
+        toolchain).
+
+        Static linking with libroot should not be supported at all for native
+        UX/RT binaries and the loader should refuse to execute a statically
+        linked executable marked as a UX/RT binary (all other libraries
+        including libc should be available in static form unless there is a good
+        reason not to though). Of course, statically linked Linux binaries
+        should still be supported though (this will be done purely through the 
+        Linux compatibility layer of course).
+    Compiler and toolchain:
+        The gcc and binutils in /bin should be wrappers that allow selecting an
+        architecture (both by command-line option and by environment variable)
+        and would exec the real gcc or binutils for that architecture (x86_32
+        and x86_64 would use the same version of gcc and binutils, but wrapped
+        by another set of wrapper scripts that pass the appropriate option to
+        select 32-bit or 64-bit).
+    Rescue system:
+        A minimal system for recovering from breakage of essential system
+        packages should be present at /rescue (similar to in some BSDs). Unlike 
+        in BSD this should have bin and lib subdirectories and include a boot 
+        image. Commands should be linked with /rescue/lib/libroot.so.?, which
+        should always search /rescue/lib before any other directories. The boot
+        image should be pre-generated and included in the package so that failed
+        upgrades are extremely unlikely to break it. The entire rescue system
+        should be installed as a single package depending on normal kernel and
+        proc packages with a matching API version. There shouldn't really be a
+        need for a separate generic boot image that is rebuilt like the normal
+        boot image since the rescue boot image will include all disk drivers and
+        it will be possible to rebuild the normal image from the rescue image 
+        in case the host adapter of the root disk changes.
+
+Window system/graphics stack/desktop:
+    Rust should probably not be the preferred language for most GUI-related 
+    code, although it should be supported. Something like Go might be preferable
+    for typical GUI applications/libraries that don't need to do anything
+    low-level or real-time.
+
+    Window server:
+        The window server should provide an extended DRI-like interface for each
+        window (hardware-specific OpenGL drivers would be used on bare metal;
+        under XHI-compatible hypervisors, a generic PV OpenGL driver could be
+        used instead). There will have to be XHI/hardware-specific driver
+        plugins for both libGL (to send rendering commands to the GPU) and the
+        window server itself (to handle allocation and enforce security by
+        setting up per-buffer device files; the server will also have to be
+        linked with libGL and the libGL driver in addition to the
+        server-specific one). A fallback 2D-only mode should be provided; this 
+        should provide only the framebuffer/surface interface and not any kind
+        of direct rendering. The OpenGL and fallback rendering paths should be
+        separate plugins loaded by the server as appropriate (the server
+        executable itself would contain very little rendering-related code).
+
+        It might be a good idea to separate the basic display/event multiplexing
+        server from the compositor, with a separate reparenting window manager
+        running on top of both, although this may be difficult to do without
+        significant overhead. All critical state could be stored in the
+        multiplexing server, in order to allow recovery from compositor crashes.
+        The window manager would draw decorations and would send window
+        positioning messages to the compositor. In addition to the usual X/Y
+        translations, the compositor should also provide APIs for scaling,
+        rotating, and duplicating windows, as well as manipulating transparency.
+        Gradual animated window transformations taking place at a WM-specified
+        speed should be supported, and window transformation messages should 
+        always include transformation, rotation, scale, and transparency, with
+        a null value used for parameters that don't need to change. These should
+        be sufficient for most window effects that are actually useful (e.g. 
+        anything that shows live thumbnails of windows, or minimized windows 
+        moving to the dock while shrinking to a thumbnail). Basically the windoe
+        manager would determine what do to, and the compositor would determine
+        how to do it.
+
+        Each window should have its own event queue that only delivers
+        events related to the window. There should also be a global
+        event queue that allows a program to see all events. Windows should be
+        grouped by application (in a directory with the application's name), and
+        each application should have access to only its own windows. It should
+        be possible for window managers (and other sufficiently privileged
+        programs that manipulate windows of other programs) to determine which
+        application a window belongs to.
+
+        If possible DRI/DRM should be built as a separate server from the window
+        server. This would require that all the high-throughput parts of the DRM
+        API could be implemented by shared memory rather than non-shared
+        interfaces that would require DRM to act as an intermediary between the
+        window server and the hardware. The console terminal emulator should
+        obviously not be built into the DRM server (or window server), and
+        should be a separate process. When running under an XHI-compatible
+        hypervisor, a serial driver along with some kind of hook to enable or
+        disable the hypervisor's terminal emulator should normally be used
+        instead of the console emulator process.
+
+        For security, it might be a good idea to have one window server process
+        for each virtual screen (although getting them to cooperate might be
+        tricky).
+
+        Multiple virtual desktops should be supported in the window server. Each
+        virtual desktop should be treated as a completely separate display
+        (although the window manager should be able to move windows between
+        desktops). Each desktop should be able to have its own resolution and
+        configuration of screens - it should be possible for one server to have
+        both virtual desktops that treat monitors as separate screens and
+        virtual desktops that combine all monitors into a single spanned screen.
+        In multi-screen configurations, it should be possible for window
+        managers to move windows between screens, unlike under X.
+
+        The compositor could probably be a fork of a Rust-based Wayland server
+        like Smithay/Anvil <https://github.com/Smithay/smithay>, with the 
+        Wayland protocol code replaced with a UX/RT-specific interface layer.
+    Clipboard:
+        The clipboard should be managed by a server separate from the window
+        server. It should present the contents as a file that appears to be a
+        regular file.
+    
+    Window manager:
+        The standard desktop window manager should have extensive scripting
+        support, and all of its behavior should be configurable through scripts.
+        It should be possible to have per-virtual-desktop window management
+        policy (this would probably just need an API to allow scripts to
+        determine which virtual desktop they are running on).
+
+        The window manager should provide some way to identify which application
+        a window belongs to (possibly with a hotkey that applications can't
+        intercept) in order to prevent spoofing.
+
+        The window manager's UI for moving windows between screens would be 
+        based on "snapping" windows between screens by dragging them over the
+        edge of the screen and holding them there, and also a "send to screen"
+        item in the window control menu. Snapping windows between desktops
+        should also be allowed; when a window is snapped over the edge of the
+        rightmost or leftmost screen it should snap to the next normal virtual
+        desktop (virtual desktops created for full-screen applications should be
+        skipped when snapping windows). It should be possible to disable the
+        snapping in the window manager configuration.
+    Keyboard shortcuts:
+        A system somewhat similar to PC versions of NeXTStep would probably be
+        the best one. Alt should serve a similar purpose to the Mac/NeXT
+        "command" key, with valid modifier key combinations for shortcuts being
+        Alt-, Alt-Shift-, and Alt-Ctrl- (Alt-Windows- or Alt-Command- should
+        never be used, so that 101-key keyboards are usable). If a Windows key
+        is present, it should function as a "symbol" key (like Alt/Option under
+        Mac OS) or as a Meta/Escape key. It should also be possible to swap the
+        function of Alt and Windows. This would especially be useful on a Mac
+        keyboard (the command key on a USB Mac keyboard sends the same scancode
+        as the Windows key on a USB Windows keyboard), to allow shortcuts to be
+        similar to those of OS X. The legends in menus should change to reflect
+        which key is the primary modifier.
+    Browser:
+        All non-HTML/CSS/JS embedded content (images, videos, sounds, etc)
+        should be handled by embedding other applications to display them.
+
+        The GUI could possibly be handled in a similar way to uzbl
+        (http://www.uzbl.org/). It might even work to just make a
+        fork/patchset/etc. of it rather than starting a new browser. In any
+        case, the default configuration that is shipped should be something that
+        behaves similarly to standard browsers, rather than a minimalist setup.
+
+Sound server:
+    This should be based on LKL with a mixing layer added on top (within the 
+    same process). When running on a hypervisor with support for exposing its 
+    own mixer interface, UX/RT's mixer should be bypassed and the hypervisor's
+    used instead (with no difference in the interface visible to clients) in 
+    order to reduce latency.
+
+Layout of root:
+    /.bootmenu - boot menu file for BOS; shouldn't list images on partitions 
+            other than its own (regular file)
+    /apps - all applications (a union binding of /envs/current/apps
+            and /local/apps)
+    /bin - symlink to /usr/bin
+    /boot - files needed during early boot before the image filesystem is
+             mounted (i.e. kernel, proc, and UX/RT-specific BOS scripts)
+        /boot/<subarchitecture> - kernel and process server optimized for a 
+                                  specific subarchitecture; if a generic kernel
+                                  and process server exist for the platform,
+                                  they will be in /boot/generic
+            /boot/<subarchitecture>/kernel - kernel (regular file)
+            /boot/<subarchitecture>/proc - process server (regular file)
+        /boot/bootrc - boot script for BOS (regular file)
+    /dev - bus-independent aliases for physical devices, as well as any other
+            system services that don't belong in one of the other directories
+            for services
+    /envs - package filesystems for each environment/universe that is installed
+        /envs/current - symlink to the current environment of the process
+    /etc - configuration (a union binding of /envs/current/etc (which should be
+        read-only) and /local/etc)
+    /home - home directories
+    /hw - physical/paravirtual device and status files (the driver mount points 
+            should be symlinked into /dev), as well as CPU/memory information
+        /hw/cpu - CPU information (there should be a common subset of this
+                across all CPU architectures)
+            /hw/cpu/cpu<n> - information for a particular CPU package 
+                /hw/cpu/cpu<n>/core<n> - information for a particular core
+        /hw/mem - memory information and raw memory access files
+        /hw/<bus type> (pci, usb, xenbus, xios, etc) - bus-specific directories
+                (these will be provided by bus access servers specific to each
+                bus)
+                (these should be watched for new entries by hotplugd)
+            /hw/<bus type>/<device ID> - device entries (these should provide
+                    memory-resident files for all MMIO regions associated with
+                    the device, as well as files that grant access to non-MMIO
+                    resources like interrupts, ports, etc. when written to)
+                /hw/<bus type>/<device ID>/dev - mount point for a driver for
+                    this device (should get symlinked into /dev by hotplugd)
+    /lib - symlink to /usr/lib
+    /local - stuff either not managed by the package manager or changed locally
+        /local/bin
+        /local/etc
+        /local/include
+        /local/lib
+        /local/sbin
+        /local/share
+        /local/var
+    /media - mount points of removable media
+    /net - all filesystems providing access to network services
+        /net/ip - IP stack (including transport layer protocols)
+        /net/fs - mount points for 9P, NFS, SMB, and other network file shares
+        /net/http - HTTP file system
+        /net/mail - remote and local mail spools (remote mail spools will use a 
+                virtual filesystem; local ones will just be bindings)
+    /pkgs - "raw" package directories, combined into usable environments with 
+            the package filesystem
+        /pkgs/store - should contain one directory for each package, with a name
+                containing at least the name, version, architecture, and some
+                kind of hash of the dependency list of the package
+        /pkgs/db - dpkg and apt databases
+        /pkgs/unmanaged - universes using non-dpkg package management systems 
+            (should this maybe go somewhere else)
+    /ports - the default port filesystem (this will be bound to /:/ports for
+            system processes and /:/users/<user>/ports for user processes)
+    /proc - process-specific files including most address space files like heap,
+            stack, shadow mappings, etc.
+    /rescue - minimal system for recovery if essential packages are broken 
+            (should be installed as a single "uxrt-rescue-system" package)
+        /rescue/bin - commands, linked with libraries in /rescue/lib 
+        /rescue/lib - dynamic libraries
+        /rescue/uxrt.boot - boot image (should be pre-built and included in
+                the deb unlike the normal boot images, in order to reduce the
+                chance of breakage)
+    /sbin - symlink to /usr/sbin
+    /srv - data for network services (link farm to something in /local?)
+    /stand - bootloader/firmware files
+                /stand/boot - boot partition (contents are architecture
+                              dependent; will be the firmware boot partition on
+                              systems that use one, e.g. UEFI)
+                /stand/bos - symlink to BOS directory in boot partition
+    /sys - filesystems providing system status
+        /sys/servers - status specific to individual servers (should contain one
+                directory per server, with subdirectories for each instance)
+                (everything else should correspond to directories in Linux
+                sysfs and should be a symlink to something in /sys/servers or
+                /hw, although stuff specific to Linux internals will obviously  
+                not be implemented)
+    /usr - binaries and static data; a collection of links and bindings to other
+            parts of the filesystem
+        /usr/bin - all commands, even administrative ones (this will be a
+            binding of at least /envs/current/bin and /local/bin)
+        /usr/include - union binding of /envs/current/include and
+            /local/include
+        /usr/lib - libraries (a union binding of /envs/current/lib and
+            /local/lib)
+        /usr/local - symlink to /local
+        /usr/sbin - daemons (both filesystem and network ones; this will be a
+            binding of at least /envs/current/sbin and /local/sbin; unlike in
+            the traditional SVR4/4.4BSD hierarchy, administrative commands
+            should go in one of the directories bound to /bin)
+        /usr/share - union binding of /envs/current/share and
+                /local/share
+    /uxrt.boot - default boot image (regular file)
+    /tmp - memfs for temporary files
+    /var - union binding of /envs/current/var and
+            /local/var
+        /var/run - could probably be a symlink to /tmp; most stuff with a native
+            UX/RT port won't use it because PID files and Unix sockets won't be
+            used
+        /var/lock - possibly make this a symlink to /tmp/lock, or maybe just to 
+            /tmp?
+
+    (process root entries that are present in the root of the root volume)
+    /.bootmenu
+    /boot?
+    /home
+    /local
+    /pkgs
+    /rescue
+    /uxrt.boot (as well as any other boot images that may be present)

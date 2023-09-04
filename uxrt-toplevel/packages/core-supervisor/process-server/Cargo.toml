@@ -1,0 +1,54 @@
+[package]
+name = "uxrt-process-server"
+version = "0.0.1"
+authors = ["Andrew Warkentin <andreww591@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+bitmap = { version = "3.2.0", path = "../fel4/rust-bitmap", features = ["no_std", "collections"] }
+multiboot2 = {path = "../../rust-multiboot2-mbi"}
+sel4 = {path = "../fel4/rust-sel4"}
+sel4-thread = {path = "../fel4/sel4-thread"}
+usync = {path = "../fel4/usync-sel4"}
+slab_allocator_core = { version = "0.2.0", path = "../fel4/slab-allocator-core" }
+log = { version = "0.4" }
+intrusive-collections = { version = "0.9", features = ["nightly"] }
+custom-slab-allocator = { version = "0.1.0", path = "../fel4/custom-slab-allocator" }
+selfe-sys = { path = "../fel4/selfe-sys" }
+sel4-start = { path = "../fel4/selfe-sys/sel4-start", features = ["panic_handler"] }
+uxrt-transport-layer = { path = "../transport-layer" }
+num-traits = { version = "0.2.15", default_features = false }
+failure = { version = "0.1.5", features = ["failure_derive"], default-features = false }
+static_assertions = "1.1.0"
+
+[dependencies.sel4-alloc]
+#features = ["debug_cspace", "debug_utspace", "debug_vspace", "debug_heap"]
+features = []
+path = "../fel4/sel4-alloc"
+
+[dependencies.rand]
+default-features = false
+version = "0.8.5"
+
+[dependencies.rand_pcg]
+default-features = false
+version = "0.3.1"
+
+[build-dependencies]
+selfe-config = { path = "../fel4/selfe-sys/selfe-config" }
+
+[features]
+#default = ["test_job", "test_alloc"]
+#default = ["test_alloc", "test_job", "test_alloc_random"]
+#default = ["test_alloc", "test_alloc_random"]
+#default = ["test_job", "test_panic_main_thread"]
+#default = ["test_job", "test_panic_secondary_thread"]
+#default = ["test_job", "test_vfs"]
+#default = ["test_job"]
+default = ["test_vfs"]
+test_job = []
+test_alloc = []
+test_alloc_random = []
+test_panic_main_thread = []
+test_panic_secondary_thread = []
+test_vfs = []

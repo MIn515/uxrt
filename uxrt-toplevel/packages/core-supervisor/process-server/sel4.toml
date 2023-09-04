@@ -1,0 +1,143 @@
+[build]
+target_specs_path = "target_specs"
+
+### PC99 (x64)
+[build.pc99]
+cross_compiler_prefix = "x86_64-linux-gnu-"
+
+[build.pc99.debug]
+make_root_task = "xargo rustc --offline --bin uxrt-process-server --manifest-path ./Cargo.toml --target x86_64-sel4-fel4"
+root_task_image = "target/x86_64-sel4-fel4/debug/uxrt-process-server"
+
+[build.pc99.release]
+make_root_task = "xargo rustc --offline --bin uxrt-process-server --manifest-path ./Cargo.toml --target x86_64-sel4-fel4"
+root_task_image = "target/x86_64-sel4-fel4/release/uxrt-process-server"
+
+### Sabre (ARMv7 imx6)
+[build.sabre]
+cross_compiler_prefix = "arm-linux-gnueabihf-"
+
+[build.sabre.debug]
+make_root_task = "cargo xbuild --target=armv7-unknown-linux-gnueabihf"
+root_task_image = "target/armv7-unknown-linux-gnueabihf/debug/example"
+
+[build.sabre.release]
+make_root_task = "cargo xbuild --target=armv7-unknown-linux-gnueabihf --release"
+root_task_image = "target/armv7-unknown-linux-gnueabihf/release/example"
+
+### TX1 Virt (aarch64)
+[build.virt]
+cross_compiler_prefix = "aarch64-linux-gnu-"
+
+[build.virt.debug]
+make_root_task = "cargo xbuild --target=aarch64-unknown-linux-gnu"
+root_task_image = "target/aarch64-unknown-linux-gnu/debug/example"
+
+[build.virt.release]
+make_root_task = "cargo xbuild --target=aarch64-unknown-linux-gnu --release"
+root_task_image = "target/aarch64-unknown-linux-gnu/release/example"
+
+[sel4]
+# Specifically selected to support the virtualized aarch64 tx1-like platform, virt
+kernel = { path = "../sel4-kernel" }
+tools = { path = "../sel4-tools" }
+util_libs = { path = "../invalid" }
+
+### arch
+
+[sel4.config.x86]
+KernelArch = 'x86'
+
+[sel4.config.arm]
+KernelArch = 'arm'
+KernelIPCBufferLocation = 'threadID_register'
+
+### sel4_arch
+
+[sel4.config.x86_64]
+KernelSel4Arch = 'x86_64'
+SelfeStaticTLS = 16384
+
+[sel4.config.aarch32]
+KernelSel4Arch = 'aarch32'
+KernelArmSel4Arch = 'aarch32'
+
+[sel4.config.aarch64]
+KernelSel4Arch = 'aarch64'
+KernelArmSel4Arch = 'aarch64'
+
+### platform
+
+[sel4.config.pc99]
+KernelPlatform = 'pc99'
+KernelX86MicroArch = 'nehalem'
+LibPlatSupportX86ConsoleDevice = 'com1'
+KernelVTX = false
+KernelX86DangerousMSR = false
+KernelX86IBPBOnContextSwitch = false
+KernelX86IBRSMode = 'ibrs_none'
+KernelX86RSBOnContextSwitch = false
+
+
+[sel4.config.sabre]
+KernelARMPlatform = 'imx6'
+KernelHaveFPU = true
+
+[sel4.config.virt]
+KernelARMPlatform = 'virt'
+KernelHaveFPU = true
+ElfloaderImage = 'elf'
+KernelArmHypervisorSupport = true
+
+### Build mode
+
+[sel4.config.debug]
+KernelPrinting = true
+KernelDebugBuild = true
+
+[sel4.config.release]
+KernelPrinting = true
+KernelDebugBuild = true
+KernelOptimisation = '-O2'
+
+[sel4.config]
+KernelColourPrinting = true
+KernelUserStackTraceLength = 16
+KernelVerificationBuild = false
+KernelBenchmarks = 'none'
+KernelFastpath = true
+LibSel4FunctionAttributes = 'public'
+KernelNumDomains = 1
+HardwareDebugAPI = true
+KernelFWholeProgram = false
+KernelResetChunkBits = 8
+KernelNumPriorities = 256
+KernelStackBits = 12
+KernelTimeSlice = 5
+KernelTimerTickMS = 2
+KernelMaxNumNodes = 2
+KernelRetypeFanOutLimit = 16384
+KernelRootCNodeSizeBits = 15
+KernelMaxNumBootinfoUntypedCaps = 230
+KernelSupportPCID = false
+KernelDebugDisablePrefetchers = false
+KernelExportPMCUser = false
+KernelFPU = 'FXSAVE'
+KernelFPUMaxRestoresSinceSwitch = 64
+KernelFSGSBase = 'msr'
+KernelHugePage = false
+KernelIOMMU = false
+KernelIRQController = 'IOAPIC'
+KernelIRQReporting = true
+KernelIsMCS = true
+KernelLAPICMode = 'XAPIC'
+KernelMaxNumIOAPIC = 1
+KernelMaxNumWorkUnitsPerPreemption = 100
+KernelMultiboot1Header = true
+KernelMultiboot2Header = true
+KernelMultibootGFXMode = 'none'
+KernelSkimWindow = true
+KernelSyscall = 'syscall'
+KernelXSaveSize = 576
+LinkPageSize = 4096
+
